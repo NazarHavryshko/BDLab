@@ -1,0 +1,967 @@
+﻿using Lab.DataBase;
+using System;
+using System.IO;
+using System.Collections.Generic;
+using Lab.menu;
+
+namespace Lab
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.InputEncoding = System.Text.Encoding.UTF8;
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+            string currentDirectory = Directory.GetCurrentDirectory();
+            string[] dbFiles = Directory.GetFiles(currentDirectory, "*.db");
+
+            if (dbFiles.Length == 0)
+            {
+                Console.WriteLine("Базу даних не знайдено! Переконайтеся, що lab.db знаходиться у папці з програмою.");
+                Console.ReadLine();
+                return;
+            }
+
+            Console.WriteLine("=== ДОСТУПНІ БАЗИ ДАНИХ ===");
+            for (int i = 0; i < dbFiles.Length; i++)
+            {
+                Console.WriteLine($"{i + 1}. {Path.GetFileName(dbFiles[i])}");
+            }
+
+            Console.Write("\nВиберіть номер бази даних: ");
+            if (!int.TryParse(Console.ReadLine(), out int dbIndex) || dbIndex < 1 || dbIndex > dbFiles.Length)
+            {
+                Console.WriteLine("Невірний вибір.");
+                return;
+            }
+
+            string selectedDbPath = dbFiles[dbIndex - 1];
+
+            MainMenu.Start(selectedDbPath);
+        }
+    }
+    
+}
+using System;
+using System.Collections.Generic;
+using Microsoft.Data.Sqlite;
+using System.Text;
+using Lab.DataBase;
+
+namespace Lab.DataBase
+{
+    internal class Route
+    {
+        public int Id { get; set; }
+        public int StopCount { get; set; }
+        public double Distance { get; set; }
+        public string? StartStop { get; set; }
+
+        public override string ToString()
+        {
+            return $"Маршрут ID: {Id} | Зупинок: {StopCount} | Відстань: {Distance} км | Початкова зупинка: {StartStop}";
+        }
+    }
+    
+
+    internal class RouteManager
+    {
+        private readonly string _connectionString;
+
+        public RouteManager(string dbFilePath)
+        {
+            _connectionString = $"Data Source={dbFilePath};";
+        }
+
+        public void Add(Route route)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "INSERT INTO Route (ID, StopCount, Distance, StartStop) VALUES (@id, @stops, @distance, @startStop)";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@id", route.Id);
+                    cmd.Parameters.AddWithValue("@stops", route.StopCount);
+                    cmd.Parameters.AddWithValue("@distance", route.Distance);
+                    cmd.Parameters.AddWithValue("@startStop", route.StartStop);
+
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public void Update(int newId, int newStopCount, string targetStartStop)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "UPDATE Route SET ID = @newId, StopCount = @newStopCount WHERE StartStop LIKE @targetStartStop";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@newId", newId);
+                    cmd.Parameters.AddWithValue("@newStopCount", newStopCount);
+                    cmd.Parameters.AddWithValue("@targetStartStop", targetStartStop);
+
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public void Delete(double minDist, double maxDist)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "DELETE FROM Route WHERE Distance BETWEEN @minDist AND @maxDist";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@minDist", minDist);
+                    cmd.Parameters.AddWithValue("@maxDist", maxDist);
+
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public bool CheckById(int Id)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "SELECT * FROM Route WHERE ID = @id";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@id", Id);
+
+                    using (SqliteDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read()) 
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        public bool CheckByStartStop(string StartStop)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "SELECT * FROM Route WHERE StartStop LIKE @StartStop";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@StartStop", StartStop);
+
+                    using (SqliteDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        public List<Route> GetAll()
+        {
+            List<Route> routes = new List<Route>();
+
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "SELECT * FROM Route order by ID";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    using (SqliteDataReader reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            routes.Add(new Route
+                            {
+                                Id = Convert.ToInt32(reader["ID"]),
+                                StopCount = Convert.ToInt32(reader["StopCount"]),
+                                Distance = Convert.ToDouble(reader["Distance"]),
+                                StartStop = reader["StartStop"].ToString()
+                            });
+                        }
+                    }
+                }
+            }
+            return routes;
+        }
+
+
+        public List<Trolleybus> GetTrolleybusesByRouteId(int routeId)
+        {
+            List<Trolleybus> trolleybuses = new List<Trolleybus>();
+
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "SELECT Number, Year, Brand, Seats, RouteID FROM Trolleybus WHERE RouteID = @routeId";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@routeId", routeId);
+
+                    using (SqliteDataReader reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            trolleybuses.Add(new Trolleybus
+                            {
+                                Number = Convert.ToInt32(reader["Number"]),
+                                Year = Convert.ToInt32(reader["Year"]),
+                                Brand = reader["Brand"].ToString(),
+                                Seats = Convert.ToInt32(reader["Seats"]),
+                                RouteId = reader["RouteID"] != DBNull.Value ? Convert.ToInt32(reader["RouteID"]) : (int?)null
+                            });
+                        }
+                    }
+                }
+            }
+            return trolleybuses;
+        }
+
+
+    }
+}
+using Microsoft.Data.Sqlite;
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace Lab.DataBase
+{
+    internal class Trolleybus
+    {
+        public int Number { get; set; }
+        public int Year { get; set; }
+        public string? Brand { get; set; }
+        public int Seats { get; set; }
+        public int? RouteId { get; set; }
+
+        public override string ToString()
+        {
+            string routeStr = RouteId.HasValue ? RouteId.Value.ToString() : "Не призначено (NULL)";
+            return $"Тролейбус №{Number} | Марка: {Brand} ({Year} р.) | Місць: {Seats} | Маршрут: {routeStr}";
+        }
+    }
+    internal class TrolleybusManager
+    {
+        private readonly string _connectionString;
+
+        public TrolleybusManager(string dbFilePath)
+        {
+            _connectionString = $"Data Source={dbFilePath};";
+        }
+
+        public void Add(Trolleybus trolleybus)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "INSERT INTO Trolleybus VALUES (@Number, @Year, @Brand, @Seats, @RouteId)";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@Number", trolleybus.Number);
+                    cmd.Parameters.AddWithValue("@Year", trolleybus.Year);
+                    cmd.Parameters.AddWithValue("@Brand", trolleybus.Brand);
+                    cmd.Parameters.AddWithValue("@Seats", trolleybus.Seats);
+                    cmd.Parameters.AddWithValue("@RouteId", trolleybus.RouteId);
+
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public void Update(Trolleybus trolleybus, int oldNumber)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "UPDATE Trolleybus SET Number = @Number, Year = @Year, Brand = @Brand, Seats = @Seats, RouteId = @RouteId WHERE Number = @oldNumber";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@Number", trolleybus.Number);
+                    cmd.Parameters.AddWithValue("@Year", trolleybus.Year);
+                    cmd.Parameters.AddWithValue("@Brand", trolleybus.Brand);
+                    cmd.Parameters.AddWithValue("@Seats", trolleybus.Seats);
+                    cmd.Parameters.AddWithValue("@RouteId", trolleybus.RouteId);
+                    cmd.Parameters.AddWithValue("@oldNumber", oldNumber);
+
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public void Delete(int Number)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "DELETE FROM Trolleybus WHERE Number = @Number";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@Number", Number);
+
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public bool CheckByNumber(int Number)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "SELECT * FROM Trolleybus WHERE Number = @id";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@id", Number);
+
+                    using (SqliteDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        public Trolleybus GetByNumber(int Number)
+        {
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "SELECT * FROM Trolleybus WHERE Number = @id";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@id", Number);
+
+                    using (SqliteDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            return new Trolleybus
+                            {
+                                Number = Convert.ToInt32(reader["Number"]),
+                                Year = Convert.ToInt32(reader["Year"]),
+                                Brand = reader["Brand"] != DBNull.Value ? reader["Brand"].ToString() : null,
+                                Seats = Convert.ToInt32(reader["Seats"]),
+                                RouteId = reader["RouteID"] != DBNull.Value ? Convert.ToInt32(reader["RouteID"]) : (int?)null
+                            };
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        public List<Trolleybus> GetAll()
+        {
+            List<Trolleybus> trolleybuses = new List<Trolleybus>();
+
+            using (SqliteConnection conn = new SqliteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "SELECT * FROM Trolleybus ORDER BY Number";
+
+                using (SqliteCommand cmd = new SqliteCommand(sql, conn))
+                {
+                    using (SqliteDataReader reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            trolleybuses.Add(new Trolleybus
+                            {
+                                Number = Convert.ToInt32(reader["Number"]),
+                                Year = Convert.ToInt32(reader["Year"]),
+                                Brand = reader["Brand"] != DBNull.Value ? reader["Brand"].ToString() : null,
+                                Seats = Convert.ToInt32(reader["Seats"]),
+                                RouteId = reader["RouteID"] != DBNull.Value ? Convert.ToInt32(reader["RouteID"]) : (int?)null
+                            });
+                        }
+                    }
+                }
+            }
+            return trolleybuses;
+        }
+    }
+}
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using Lab.DataBase;
+using System.IO;
+using Lab.Verification;
+using Lab.Test;
+
+namespace Lab.menu
+{
+    internal class MainMenu
+    {
+        public static void Start(string dbPath)
+        {
+            while (true)
+            {
+                Console.Clear();
+                Console.WriteLine($"Робота з базою: {dbPath}");
+                Console.WriteLine("\n=== ГОЛОВНЕ МЕНЮ ===");
+                Console.WriteLine("1. Робота з маршрутами");
+                Console.WriteLine("2. Робота з тролейбусами");
+                Console.WriteLine("0. Вихід");
+                Console.Write("Ваш вибір: ");
+
+                int choice = MenuVerification.GetValidChoice();
+
+                switch (choice)
+                {
+                    case 1:
+                        RouteMenu.Start(dbPath);
+                        break;
+                    case 2:
+                        TrolleybusMenu.Start(dbPath);
+                        break;
+                    case 9:
+                        TestBD.InitializeTestData(dbPath);
+                        break;
+                    case 0:
+                        Console.WriteLine("Програму завершено.");
+                        return;
+                    default:
+                        Console.WriteLine("Невірний вибір. Натисніть Enter...");
+                        Console.ReadLine();
+                        break;
+                }
+            }
+        }
+    }
+}
+using System;
+using System.Collections.Generic;
+using System.Text;
+using Lab.DataBase;
+using Lab.Verification;
+
+
+namespace Lab.menu
+{
+    internal class RouteMenu
+    {
+        public static void Start(string dbPath)
+        {
+            RouteManager routeManager = new RouteManager(dbPath);
+
+            while (true)
+            {
+                Console.Clear();
+                Console.WriteLine("\n--- МЕНЮ: МАРШРУТИ ---");
+                Console.WriteLine("1. Вивести всі маршрути");
+                Console.WriteLine("2. Додати маршрут");
+                Console.WriteLine("3. Оновити маршрут");
+                Console.WriteLine("4. Видалити маршрут");
+                Console.WriteLine("5. Вивести всі тролейбуси за ID маршруту");
+                Console.WriteLine("0. Повернутися назад");
+                Console.Write("Ваш вибір: ");
+
+                int choice = MenuVerification.GetValidChoice();
+
+                switch (choice)
+                {
+                    case 1:
+                        ShowAllRoutes(routeManager);
+                        break;
+                    case 2:
+                        AddRoute(routeManager);
+                        break;
+                    case 3:
+                        UpdateRoute(routeManager);
+                        break;
+                    case 4:
+                        DeleteRoute(routeManager);
+                        break;
+                    case 5:
+                        ShowTrolleybusesByRoute(routeManager);
+                        break;
+                    case 0:
+                        return;
+                    default:
+                        Console.WriteLine("Невірний вибір. Натисніть Enter...");
+                        Console.ReadLine();
+                        break;
+                }
+
+                Console.WriteLine("\nНатисніть Enter для продовження...");
+                Console.ReadLine();
+            }
+        }
+
+        private static void ShowAllRoutes(RouteManager rm)
+        {
+            Console.WriteLine("\n--- СПИСОК МАРШРУТІВ ---");
+            // Передбачається, що в RouteManager є метод GetAllRoutes(), який повертає List<Route>
+            var routes = rm.GetAll();
+
+            if (routes.Count == 0)
+            {
+                Console.WriteLine("База даних маршрутів порожня.");
+                return;
+            }
+
+            foreach (var route in routes)
+            {
+                // Передбачається, що в класі Route перевизначено метод ToString()
+                Console.WriteLine(route.ToString());
+            }
+        }
+
+        private static void AddRoute(RouteManager rm)
+        {
+            Console.WriteLine("\n--- ДОДАВАННЯ МАРШРУТУ ---");
+
+            int id = MenuVerification.GetInt("Введіть ID маршруту: ");
+            while (rm.CheckById(id))
+            {
+                Console.WriteLine("Маршрут з таким ID вже існує. Спробуйте ще раз.");
+                id = MenuVerification.GetInt("Введіть ID маршруту: ");
+            }
+
+            int stopCount = MenuVerification.GetInt("Введіть кількість зупинок: ");
+
+            double distance = MenuVerification.GetDouble("Введіть відстань (км): ");
+
+            Console.Write("Введіть початкову зупинку: ");
+            string startStop = Console.ReadLine().Trim();
+            while (rm.CheckByStartStop(startStop))
+            {
+                Console.WriteLine("Маршрут з такою початковою зупинкою вже існує. Спробуйте ще раз.");
+                Console.Write("Введіть початкову зупинку: "); 
+                startStop = Console.ReadLine().Trim();
+            }
+            
+            Route newRoute = new Route
+            {
+                Id = id,
+                StopCount = stopCount,
+                Distance = distance,
+                StartStop = startStop
+            };
+
+            rm.Add(newRoute);
+            Console.WriteLine("Маршрут успішно додано!");
+        }
+
+        private static void UpdateRoute(RouteManager rm)
+        {
+            ShowAllRoutes(rm);
+            Console.WriteLine("\n--- ОНОВЛЕННЯ МАРШРУТУ ЗА ПОЧАТКОВОЮ ЗУПИНКОЮ ---");
+
+            Console.Write("Введіть початкову зупинку маршруту, який хочете оновити (умова пошуку): ");
+            string targetStartStop = Console.ReadLine().Trim();
+            while (!rm.CheckByStartStop(targetStartStop))
+            {
+                Console.WriteLine("Маршрут з такою початковою зупинкою не існує. Спробуйте ще раз.");
+                Console.Write("Введіть початкову зупинку: ");
+                targetStartStop = Console.ReadLine().Trim();
+            }
+
+
+            int newId = MenuVerification.GetInt("Введіть НОВИЙ ID маршруту: ");
+            while (rm.CheckById(newId))
+            {
+                Console.WriteLine("Маршрут з таким ID вже існує. Спробуйте ще раз.");
+                newId = MenuVerification.GetInt("Введіть НОВИЙ ID маршрутуу: ");
+            }
+
+            int newStopCount = MenuVerification.GetInt("Введіть НОВУ кількість зупинок: ");
+
+            rm.Update(newId, newStopCount, targetStartStop);
+        }
+
+        private static void DeleteRoute(RouteManager rm)
+        {
+            Console.WriteLine("\n--- ВИДАЛЕННЯ МАРШРУТІВ ЗА ДІАПАЗОНОМ ВІДСТАНЕЙ ---");
+
+            double minDist = MenuVerification.GetDouble("Введіть мінімальну відстань (км): ");
+
+            double maxDist = MenuVerification.GetDouble("Введіть максимальну відстань (км): ");
+
+
+            rm.Delete(minDist, maxDist);
+        }
+
+        private static void ShowTrolleybusesByRoute(RouteManager rm)
+        {
+            Console.WriteLine("\n--- ТРОЛЕЙБУСИ НА МАРШРУТІ ---");
+            Console.Write("Введіть ID маршруту: ");
+            int routeId = int.Parse(Console.ReadLine());
+
+            var trolleybuses = rm.GetTrolleybusesByRouteId(routeId);
+
+            if (trolleybuses.Count == 0)
+            {
+                Console.WriteLine("На цьому маршруті немає жодного тролейбуса або маршрут не існує.");
+                return;
+            }
+
+            foreach (var t in trolleybuses)
+            {
+                Console.WriteLine(t.ToString());
+            }
+        }
+    }
+}
+using System;
+using System.Collections.Generic;
+using Lab.DataBase;
+using Lab.Verification;
+
+namespace Lab.menu
+{
+    internal class TrolleybusMenu
+    {
+        public static void Start(string dbPath)
+        {
+            TrolleybusManager trolleybusManager = new TrolleybusManager(dbPath);
+
+            while (true)
+            {
+                Console.Clear();
+                Console.WriteLine("\n--- МЕНЮ: ТРОЛЕЙБУСИ ---");
+                Console.WriteLine("1. Вивести всі тролейбуси");
+                Console.WriteLine("2. Додати тролейбус");
+                Console.WriteLine("3. Оновити тролейбус");
+                Console.WriteLine("4. Видалити тролейбус");
+                Console.WriteLine("0. Повернутися назад");
+                Console.Write("Ваш вибір: ");
+
+                int choice = MenuVerification.GetValidChoice();
+
+                switch (choice)
+                {
+                    case 1:
+                        ShowAllTrolleybuses(trolleybusManager);
+                        break;
+                    case 2:
+                        AddTrolleybus(trolleybusManager);
+                        break;
+                    case 3:
+                        UpdateTrolleybus(trolleybusManager);
+                        break;
+                    case 4:
+                        DeleteTrolleybus(trolleybusManager);
+                        break;
+                    case 0:
+                        return;
+                    default:
+                        Console.WriteLine("Невірний вибір. Натисніть Enter...");
+                        Console.ReadLine();
+                        break;
+                }
+
+                Console.WriteLine("\nНатисніть Enter для продовження...");
+                Console.ReadLine();
+            }
+        }
+
+        private static void ShowAllTrolleybuses(TrolleybusManager tm)
+        {
+            Console.WriteLine("\n--- СПИСОК ТРОЛЕЙБУСІВ ---");
+            var trolleybuses = tm.GetAll();
+
+            if (trolleybuses.Count == 0)
+            {
+                Console.WriteLine("База даних тролейбусів порожня.");
+                return;
+            }
+
+            foreach (var t in trolleybuses)
+            {
+                Console.WriteLine(t.ToString());
+            }
+        }
+
+        private static void AddTrolleybus(TrolleybusManager tm)
+        {
+            Console.WriteLine("\n--- ДОДАВАННЯ ТРОЛЕЙБУСА ---");
+
+            int number = MenuVerification.GetInt("Введіть бортовий номер тролейбуса: ");
+            while (tm.CheckByNumber(number))
+            {
+                Console.WriteLine("Тролейбус з таким номером вже існує. Спробуйте ще раз.");
+                number = MenuVerification.GetInt("Введіть бортовий номер тролейбуса: ");
+            }
+
+            int year = MenuVerification.GetInt("Введіть рік випуску: ");
+            while (year < 1980 || year > DateTime.Now.Year)
+            {
+                Console.WriteLine("Рік випуску має бути більше ніж 1980 і не більший за поточний. Спробуйте ще раз.");
+                year = MenuVerification.GetInt("Введіть рік випуску: ");
+            }
+
+            Console.Write("Введіть марку тролейбуса: ");
+            string brand = Console.ReadLine().Trim();
+
+            int seats = MenuVerification.GetInt("Введіть кількість місць: ");
+
+            // Для RouteId робимо підтримку Null, якщо користувач просто натисне Enter
+            Console.Write("Введіть ID маршруту (або натисніть Enter, якщо не призначено): ");
+
+            string routeInput = Console.ReadLine().Trim();
+            int? routeId = null;
+
+            if (!string.IsNullOrEmpty(routeInput) && int.TryParse(routeInput, out int rId))
+            {
+                routeId = rId;
+            }
+
+            Trolleybus newTrolleybus = new Trolleybus
+            {
+                Number = number,
+                Year = year,
+                Brand = brand,
+                Seats = seats,
+                RouteId = routeId
+            };
+
+            tm.Add(newTrolleybus);
+            Console.WriteLine("Тролейбус успішно додано!");
+        }
+
+        private static void UpdateTrolleybus(TrolleybusManager tm)
+        {
+            Console.WriteLine("\n--- ОНОВЛЕННЯ ТРОЛЕЙБУСА ---");
+
+            int oldNumber = MenuVerification.GetInt("Введіть номер тролейбуса, який хочете оновити: ");
+
+            // Отримуємо існуючий об'єкт з бази через GetByNumber
+            Trolleybus existingTrolleybus = tm.GetByNumber(oldNumber);
+            while (existingTrolleybus == null)
+            {
+                Console.WriteLine("Тролейбус з таким номером не існує. Спробуйте ще раз.");
+                oldNumber = MenuVerification.GetInt("Введіть номер тролейбуса, який хочете оновити: ");
+                existingTrolleybus = tm.GetByNumber(oldNumber);
+            }
+
+            Console.WriteLine($"\nЗнайдено тролейбус: {existingTrolleybus}");
+            Console.WriteLine("Якщо ви не хочете змінювати певне поле, просто натисніть Enter (для чисел введіть поточне значення або залиште логіку за потребою).");
+
+            // Номер
+            int newNumber = MenuVerification.GetInt($"Введіть НОВИЙ номер (поточний: {existingTrolleybus.Number}): ");
+            while (newNumber != oldNumber && tm.GetByNumber(newNumber) != null)
+            {
+                Console.WriteLine("Тролейбус з таким новим номером вже існує. Спробуйте ще раз.");
+                newNumber = MenuVerification.GetInt("Введіть НОВИЙ номер тролейбуса: ");
+            }
+
+            // Рік випуску
+            int year = MenuVerification.GetInt($"Введіть НОВИЙ рік випуску (поточний: {existingTrolleybus.Year}): ");
+            while (year < 1980 || year > DateTime.Now.Year)
+            {
+                Console.WriteLine("Рік випуску має бути більше ніж 1980 і не більший за поточний. Спробуйте ще раз.");
+                year = MenuVerification.GetInt("Введіть рік випуску: ");
+            }
+
+            // Марка
+            Console.Write($"Введіть НОВУ марку (поточна: {existingTrolleybus.Brand}): ");
+            string brandInput = Console.ReadLine().Trim();
+            string brand = string.IsNullOrEmpty(brandInput) ? existingTrolleybus.Brand : brandInput;
+
+            // Кількість місць
+            int seats = MenuVerification.GetInt($"Введіть НОВУ кількість місць (поточна: {existingTrolleybus.Seats}): ");
+
+            // ID маршруту
+            Console.Write($"Введіть НОВИЙ ID маршруту (поточний: {(existingTrolleybus.RouteId.HasValue ? existingTrolleybus.RouteId.Value.ToString() : "NULL")}, або Enter щоб залишити без змін): ");
+            string routeInput = Console.ReadLine().Trim();
+            int? routeId = existingTrolleybus.RouteId;
+
+            if (!string.IsNullOrEmpty(routeInput))
+            {
+                if (int.TryParse(routeInput, out int rId))
+                {
+                    routeId = rId;
+                }
+            }
+
+            // Оновлюємо поля існуючого об'єкта
+            existingTrolleybus.Number = newNumber;
+            existingTrolleybus.Year = year;
+            existingTrolleybus.Brand = brand;
+            existingTrolleybus.Seats = seats;
+            existingTrolleybus.RouteId = routeId;
+
+            // Передаємо повністю оновлений об'єкт на збереження
+            tm.Update(existingTrolleybus, oldNumber);
+            Console.WriteLine("Тролейбус успішно оновлено!");
+        }
+
+        private static void DeleteTrolleybus(TrolleybusManager tm)
+        {
+            Console.WriteLine("\n--- ВИДАЛЕННЯ ТРОЛЕЙБУСА ---");
+
+            int number = MenuVerification.GetInt("Введіть номер тролейбуса для видалення: ");
+            while (!tm.CheckByNumber(number))
+            {
+                Console.WriteLine("Тролейбус з таким номером не знайдено. Спробуйте ще раз.");
+                number = MenuVerification.GetInt("Введіть номер тролейбуса для видалення: ");
+            }
+
+            tm.Delete(number);
+            Console.WriteLine("Тролейбус успішно видалено!");
+        }
+    }
+}
+using System;
+using Microsoft.Data.Sqlite;
+
+namespace Lab.Test
+{
+    internal class TestBD
+    {
+        public static void InitializeTestData(string dbFilePath)
+        {
+            string connectionString = $"Data Source={dbFilePath};Foreign Keys=True;";
+
+            using (SqliteConnection conn = new SqliteConnection(connectionString))
+            {
+                conn.Open();
+
+                // Очищення поточних даних (спочатку дочірня таблиця Trolleybus через зовнішній ключ, потім Route)
+                using (var clearCmd = conn.CreateCommand())
+                {
+                    clearCmd.CommandText = "DELETE FROM Trolleybus; DELETE FROM Route;";
+                    clearCmd.ExecuteNonQuery();
+                }
+
+                // Масив із 5 тестових маршрутів
+                var routes = new[]
+                {
+                    new { Id = 1, StopCount = 5, Distance = 4.5, StartStop = "Центр" },
+                    new { Id = 2, StopCount = 8, Distance = 7.2, StartStop = "Вокзал" },
+                    new { Id = 3, StopCount = 6, Distance = 5.0, StartStop = "Ринок" },
+                    new { Id = 4, StopCount = 10, Distance = 12.3, StartStop = "Парк" },
+                    new { Id = 5, StopCount = 4, Distance = 3.1, StartStop = "Університет" }
+                };
+
+                // Вставка маршрутів
+                foreach (var r in routes)
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "INSERT INTO Route (ID, StopCount, Distance, StartStop) VALUES (@id, @stops, @dist, @start)";
+                        cmd.Parameters.AddWithValue("@id", r.Id);
+                        cmd.Parameters.AddWithValue("@stops", r.StopCount);
+                        cmd.Parameters.AddWithValue("@dist", r.Distance);
+                        cmd.Parameters.AddWithValue("@start", r.StartStop);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                Random random = new Random();
+                int trolleybusNumber = 101;
+                string[] brands = { "Богдан", "Електрон", "ЛАЗ", "Skoda", "МАЗ" };
+
+                foreach (var r in routes)
+                {
+                    int trolleybusCount = random.Next(2, 5); 
+
+                    for (int i = 0; i < trolleybusCount; i++)
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.CommandText = "INSERT INTO Trolleybus (Number, Year, Brand, Seats, RouteID) VALUES (@num, @year, @brand, @seats, @routeId)";
+                            cmd.Parameters.AddWithValue("@num", trolleybusNumber++);
+                            cmd.Parameters.AddWithValue("@year", random.Next(2010, 2025));
+                            cmd.Parameters.AddWithValue("@brand", brands[random.Next(brands.Length)]);
+                            cmd.Parameters.AddWithValue("@seats", random.Next(22, 42));
+                            cmd.Parameters.AddWithValue("@routeId", r.Id);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace Lab.Verification
+{
+    internal class MenuVerification
+    {
+        public static int GetValidChoice()
+        {
+            while (true)
+            {
+                string input = Console.ReadLine();
+
+                if (int.TryParse(input, out int choice))
+                {
+                    return choice; 
+                }
+
+                Console.WriteLine($"\nПомилка вводу! Будь ласка, введіть число.");
+                Console.Write("Ваш вибір: ");
+            }
+        }
+
+        public static int GetInt(string massage)
+        {
+            Console.Write(massage);
+            while (true)
+            {
+                string input = Console.ReadLine();
+
+                if (int.TryParse(input, out int choice) && choice > 0)
+                {
+                    return choice; 
+                }
+
+                Console.WriteLine($"\nПомилка вводу! Будь ласка, введіть ціле число");
+                Console.Write("Введіть повторно: ");
+            }
+        }
+
+        public static double GetDouble(string massage)
+        {
+            Console.Write(massage);
+            while (true)
+            {
+                string input = Console.ReadLine();
+
+                if (double.TryParse(input, out double choice) && choice > 0)
+                {
+                    return choice;
+                }
+
+                Console.WriteLine($"\nПомилка вводу! Будь ласка, введіть дробове число (3,бб) число");
+                Console.Write("Введіть повторно: ");
+            }
+        }
+    }
+}
