@@ -123,7 +123,7 @@ namespace Lab.menu
 
             // Отримуємо існуючий об'єкт з бази через GetByNumber
             Trolleybus existingTrolleybus = tm.GetByNumber(oldNumber);
-            while (existingTrolleybus == null)
+            while (!tm.CheckByNumber(oldNumber))
             {
                 Console.WriteLine("Тролейбус з таким номером не існує. Спробуйте ще раз.");
                 oldNumber = MenuVerification.GetInt("Введіть номер тролейбуса, який хочете оновити: ");

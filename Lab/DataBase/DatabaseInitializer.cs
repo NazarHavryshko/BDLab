@@ -31,7 +31,7 @@ namespace Lab.DataBase
                         FOREIGN KEY (RouteID) REFERENCES Route(ID)
                     );
 
-                    -- Перевіряємо та створюємо тригери (SQLite не має CREATE TRIGGER IF NOT EXISTS, тому видаляємо перед створенням)
+                    
                     DROP TRIGGER IF EXISTS update_route_id_cascade;
                     CREATE TRIGGER update_route_id_cascade AFTER UPDATE OF ID ON Route 
                     BEGIN 
